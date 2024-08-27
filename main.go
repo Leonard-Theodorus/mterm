@@ -5,12 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/user"
 	"strings"
+    "strconv"
 )
 
 const configFileName = ".mterm"
+const scriptFileName = "mterm.sh"
 
 func isHelpFlagPresent() bool {
 
@@ -21,6 +22,43 @@ func isHelpFlagPresent() bool {
     }
     return false
 }
+
+func checkScript() bool {
+    _ , err := os.OpenFile(scriptFileName,os.O_CREATE |  os.O_EXCL, 0755)
+    if err != nil {
+        //File already exists
+        return true
+    }
+    return false
+}
+
+func createCdScript() {
+    const scriptContent = `
+    #!/usr/bin/env bash
+    function mterm() {
+        local path
+        read -r path
+        path=$(echo "$path")
+
+        if [ -d "$path" ]; then
+        cd "$path" || exit
+        echo "Changed directory to $(pwd)"
+        else
+        echo "Error: $path is not a valid directory."
+        exit 1
+        fi
+    }
+    `
+    script, wErr := os.OpenFile(scriptFileName, os.O_CREATE | os.O_RDWR, 0755)
+    if wErr != nil {
+        //File already exists
+        fmt.Println("Error when creating script :", wErr)
+        os.Exit(0)
+    }
+    defer script.Close()
+    script.WriteString(scriptContent)
+}
+
 func getLineNumber() int {
     dirErr := os.Chdir(getConfigFilePath())
     if dirErr != nil {
@@ -39,7 +77,6 @@ func getLineNumber() int {
     line := 1
     scanner := bufio.NewScanner(configFile)
     for scanner.Scan() {
-        fmt.Println(scanner.Text())
         line++
     }
     return line
@@ -113,7 +150,7 @@ func getConfigFilePath() string {
 func getSavedPath(idx int) string {
     savedPaths := readConfigFile()
     lineNumber := getLineNumber()
-    if idx > lineNumber {
+    if idx >= lineNumber {
         fmt.Println("Path with that number doesn't exist. Run -p or --print to see saved paths")
         os.Exit(0)
     }
@@ -123,74 +160,95 @@ func getSavedPath(idx int) string {
 }
 
 func jumpToPath(idx int) {
-    //TODO: Find ways to engineer changing paths
     path := getSavedPath(idx)
-    cmd := exec.Command("cd", path)
-    cmdOut, err := cmd.Output()
-    if err != nil {
-        fmt.Println(err)
-        os.Exit(1)
-    } else {
-        fmt.Printf("%s\n", cmdOut)
-    }
+    fmt.Println(path)
 }
 
 func main () {
 
-    flag.BoolFunc("h", "Help commands for memoterm", func(s string) error {
-        return nil // no-error
-    })
-    pathFlag := flag.String("i", "Esc", "Insert new path")
-    readFlag := flag.Bool("p", false, "Print out saved paths")
-    jumpFlag := flag.Int("j", 0, "Jump to saved path")
-    for idx, arg := range os.Args {
+    if !checkScript() {
+        createCdScript()
+        fmt.Println("Config created, run -h for list of commands")
+    } else {
+        flag.BoolFunc("h", "Help commands for memoterm", func(s string) error {
+            return nil // no-error
+        })
+        pathFlag := flag.String("i", "Esc", "Insert new path")
+        readFlag := flag.Bool("p", false, "Print out saved paths")
+        jumpFlag := flag.Int("j", 0, "Jump to saved path")
+        for idx, arg := range os.Args {
 
-        if arg == "--insert"{
-            os.Args[idx] = "-i"
-            if idx + 1 < len(os.Args) {
-                *pathFlag = os.Args[idx + 1]
-            } else {
-                fmt.Println("--insert expects an argument <path>")
+            if arg == "--insert"{
+                os.Args[idx] = "-i"
+                if idx + 1 < len(os.Args) {
+                    *pathFlag = os.Args[idx + 1]
+                } else {
+                    fmt.Println("--insert expects an argument <path>")
+                    os.Exit(0)
+                }
+            } else if arg == "-i" {
+                if idx + 1 >= len(os.Args) {
+                    fmt.Printf("%s expects an argument <path>\n", arg)
+                    os.Exit(0)
+                }
+            } else if arg == "--i" {
+                fmt.Println("Maybe you meant -i or --insert ?")
                 os.Exit(0)
             }
-        } else if arg == "-i" {
-            if idx + 1 >= len(os.Args) {
-                fmt.Printf("%s expects an argument <path>\n", arg)
+
+            if arg == "--print" {
+                os.Args[idx] = "-p"
+                *readFlag = true
+            } else if arg == "--p" {
+                fmt.Println("Maybe you meant -p or --print ?")
                 os.Exit(0)
             }
-        } else if arg == "--i" {
-            fmt.Println("Maybe you meant -i or --insert ?")
+
+            if arg == "--jump" {
+                os.Args[idx] = "-j"
+                if idx + 1 < len(os.Args) {
+                    parsedArg, convErr := strconv.Atoi(os.Args[idx + 1])
+                    if convErr != nil {
+                        fmt.Println("Error parsing argument : ", convErr)
+                        os.Exit(0)
+                    }
+                    *jumpFlag = parsedArg
+                } else {
+                    fmt.Println("--jump expects an argument <index>")
+                    os.Exit(0)
+                }
+            } else if arg == "-j" {
+                if idx + 1 >= len(os.Args) {
+                    fmt.Printf("%s expects an argument <index>\n", arg)
+                    os.Exit(0)
+                }
+            } else if arg == "--j" {
+                fmt.Println("Maybe you meant -j or --jump ?")
+                os.Exit(0)
+            }
+        }
+        flag.Parse()
+
+        if isHelpFlagPresent() || len(os.Args) < 2 {
+            //TODO: Update the command lists
+            fmt.Println("Usage: mterm [-i | --insert] <path>")
+            fmt.Printf("%6s", "mterm [-p || --print]\n")
+            fmt.Printf("%6s", "mterm [-j || --jump] | mterm\n")
             os.Exit(0)
         }
 
-        if arg == "--print" {
-            *readFlag = true
-        } else if arg == "--p" {
-            fmt.Println("Maybe you meant -p or --print ?")
+        arg := os.Args[1]
+        switch arg {
+        case "-i" :
+            insertNewPath(*pathFlag)
+        case "-p":
+            printSavedPaths()
+        case "-j":
+            jumpToPath(*jumpFlag)
+
+        default:
+            fmt.Println("No such command, run mterm -h for help")
             os.Exit(0)
         }
     }
-    flag.Parse()
-
-    if isHelpFlagPresent() {
-        //TODO: Update the command lists
-        fmt.Println("Usage: mterm [-i | --insert] <path>")
-        os.Exit(0)
-    }
-
-    arg := os.Args[1]
-    switch arg {
-    case "-i" :
-        //function save
-        insertNewPath(*pathFlag)
-    case "-p":
-        printSavedPaths()
-    case "-j":
-        jumpToPath(*jumpFlag)
-
-    default:
-        fmt.Println("No such command, run mterm -h for help")
-        os.Exit(0)
-    }
-
 }
