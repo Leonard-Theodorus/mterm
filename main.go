@@ -330,9 +330,9 @@ func main () {
         if isHelpFlagPresent() || len(os.Args) < 2 {
             //TODO: Update the command lists
             fmt.Println("Usage: mterm [-i | --insert] <path>")
-            fmt.Printf("%6s", "mterm [-p || --print]\n")
-            fmt.Printf("%6s", "mterm [-j || --jump] <index> | mterm\n")
-            fmt.Printf("%6s", "mterm [-d || --delete] <index>\n")
+            fmt.Printf("%6s mterm %s\n", "", "[-p || --print]")
+            fmt.Printf("%6s mterm %s\n", "", "[-j || --jump] <index> | mterm")
+            fmt.Printf("%6s mterm %s\n", "", "[-d || --delete] <index>")
             os.Exit(0)
         }
 
